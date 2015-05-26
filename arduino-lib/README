@@ -1,0 +1,3 @@
+The rover directory should be copied to your Arduino libraries directory.
+
+You can then import the library using the Arduino GUI.
