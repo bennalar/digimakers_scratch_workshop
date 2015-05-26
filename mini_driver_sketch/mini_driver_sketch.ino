@@ -1,9 +1,12 @@
 // Copyright (c) 2013 Dawn Robotics Ltd - Alan Broun <abroun@dawnrobotics.co.uk>
+// Adapted by Phil Bennett 2015 for the Rover kit
 
 #include <stdint.h>
 #include "rover_motor.h"
 
 
+/*
+//Original values
 const int LEFT_DIR_PIN = 7;
 const int LEFT_PWM_PIN = 9;
 const int LEFT_ENCODER_FIRST_PIN = 3;
@@ -15,14 +18,34 @@ const int RIGHT_ENCODER_FIRST_PIN = 2;
 const int RIGHT_ENCODER_SECOND_PIN = 4;
 
 //const int ULTRASONIC_PIN = 12;
+*/
+
+//Values from the manual
+const int ONBOARD_LED_PIN = 13;
+
+const int LEFT_DIR_PIN = 12;
+const int LEFT_PWM_PIN = 11;
+const int LEFT_ENCODER_FIRST_PIN = 3;
+const int LEFT_ENCODER_SECOND_PIN = 5;
+
+const int RIGHT_DIR_PIN = 7;
+const int RIGHT_PWM_PIN = 6;
+const int RIGHT_ENCODER_FIRST_PIN = 2;
+const int RIGHT_ENCODER_SECOND_PIN = 4;
+
+//const int ULTRASONIC_PIN = 12;
 
 const float ABS_MOVE_RPM = 40.0f;
 const float ABS_TURN_RPM = 40.0f;
 
+//FIXME: ?? Other motor driver has additional field for current pin
 RoverMotor gLeftMotor( LEFT_DIR_PIN, LEFT_PWM_PIN,
     LEFT_ENCODER_FIRST_PIN, LEFT_ENCODER_SECOND_PIN );
 RoverMotor gRightMotor( RIGHT_DIR_PIN, RIGHT_PWM_PIN,
     RIGHT_ENCODER_FIRST_PIN, RIGHT_ENCODER_SECOND_PIN );
+//------------------------------------------------------------------------------
+/* Function orward declarations */
+void blinkOnboardLed();
 
 //------------------------------------------------------------------------------
 void setup()
@@ -38,6 +61,9 @@ void loop()
     
     while ( Serial.available() )
     {
+        //Blink twice to indicate a serial read
+        blinkOnboardLed(100);
+        blinkOnboardLed(100);
         char command = Serial.read();
         switch ( command )
         {
@@ -99,4 +125,10 @@ void loop()
     //Serial.println( distanceCM );
 }
 
+void blinkOnboardLed(int numMilliSecs)
+{
+    digitalWrite(ONBOARD_LED_PIN, HIGH);   // turn the LED on (HIGH is the voltage level)
+    delay(numMilliSecs);               // wait for numMilliSecs
+    digitalWrite(ONBOARD_LED_PIN, LOW);    // turn the LED off by making the voltage LOW
+}
 
