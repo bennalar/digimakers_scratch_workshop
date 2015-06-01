@@ -453,11 +453,11 @@ class RobotSimulator( scratch_background.ScratchBase ):
                         
                     self.lastAllCommandsCompleteSent = self.allCommandsComplete
                 
-                #for i, obstacle in enumerate( self.OBSTACLES ):
+                for i, obstacle in enumerate( self.OBSTACLES ):
                     
-                    #self.sendSensorUpdate( "Obstacle_{0}_X".format( i + 1 ), obstacle.posX )
-                    #self.sendSensorUpdate( "Obstacle_{0}_Y".format( i + 1 ), obstacle.posY )
-                    #self.sendSensorUpdate( "Obstacle_{0}_HeadingDegrees".format( i + 1 ), obstacle.headingDegrees )
+                    self.sendSensorUpdate( "Obstacle_{0}_X".format( i + 1 ), obstacle.posX )
+                    self.sendSensorUpdate( "Obstacle_{0}_Y".format( i + 1 ), obstacle.posY )
+                    self.sendSensorUpdate( "Obstacle_{0}_HeadingDegrees".format( i + 1 ), obstacle.headingDegrees )
                 
                 self.timeOfLastSensorUpdate = curTime
                 
