@@ -1,0 +1,20 @@
+{
+    "extensionName": "roverRobot",
+    "extensionPort": 42002,
+    "blockSpecs": [
+        ["w", "move Rover forward %n cm", "forward", 1],
+        ["w", "move Rover backward %n cm", "reverse", 1],
+        ["w", "turn Rover left %n degrees", "left", 90],
+        ["w", "turn Rover right %n degrees", "right", 90],
+        ["r", "get detected artifact id", "artifactID", -1],
+        ["r", "get Rover %m.pos position", "roverPos", 0],
+        ["r", "Rover command completed (true = 1)", "allCommandsComplete", 0],
+        ["r", "get Artifact %m.pos position", "artifactPos"],
+        ["r", "get Obstacle %n %m.pos position", "obstaclePos", 1],
+        ["r", "get sonar distance", "ultrasonicRangeCM"],
+
+    ],
+    "menus": {
+        "pos": ["x", "y", "headingDegrees"],
+    }
+}

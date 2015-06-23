@@ -8,6 +8,7 @@ import scratch_simulator_background_script
 import multiprocessing
 import logging
 import re
+import threading
 
 #Constants - should be shared amongst all python scripts
 PREPARE_FOR_COMMAND_CMD = "prepareforcommand"
@@ -20,7 +21,7 @@ HOST_NAME = 'localhost'
 HTTP_PORT_NUMBER = 42002
 
 #Turn on/off poll GET requet logs - we have around 25 a second
-doNotLogPollMessages = True
+doNotLogPollMessages = False
 
 #Only one instance of the server should be created
 class ScratchHTTPServer:
@@ -30,6 +31,9 @@ class ScratchHTTPServer:
         ScratchHTTPServer.httpRobotSimulator = httpRobotSim
         ScratchHTTPHandler.httpRobotSimulator = httpRobotSim
         ScratchHTTPHandler.reporter_values = {}
+        ScratchHTTPHandler.lastCommandId = -1
+        ScratchHTTPHandler.canReturnReporterValues = threading.Event()
+        ScratchHTTPHandler.canReturnReporterValues.set()
 
         self.hostName = hostName
         self.portNumber = portNumber
@@ -50,10 +54,13 @@ class ScratchHTTPServer:
 class ScratchHTTPHandler( BaseHTTPServer.BaseHTTPRequestHandler ):
     global httpRobotSimulator
     global reporter_values #Stores the reporter values
+    global lastCommandId
+    global canReturnReporterValues #Used to indicate whether we are running a command (and therefore changing the values)
 
     def reset(self, params):
         self.submitCommand( RESET_CMD )
         ScratchHTTPHandler.reporter_values.clear()
+        ScratchHTTPHandler.lastCommandId = "-1"
     
     def poll(self, params):
         return self.checkForReporterUpdates()
@@ -80,12 +87,13 @@ class ScratchHTTPHandler( BaseHTTPServer.BaseHTTPRequestHandler ):
 
     def submitCommand(self, command):
         """Submit the command to the simulator."""
+
         ScratchHTTPHandler.httpRobotSimulator.commandQueue.put( PREPARE_FOR_COMMAND_CMD )
         ScratchHTTPHandler.httpRobotSimulator.commandQueue.put( command )
 
     def do_GET(self):
         """Respond to a scratch HTTP request."""
-        
+
         cmds = {
             "poll" : self.poll,
             "forward" : self.forward,
@@ -99,15 +107,33 @@ class ScratchHTTPHandler( BaseHTTPServer.BaseHTTPRequestHandler ):
         message = ""
         cmdpath = parsed_path[2].split('/')
         handler = cmds[cmdpath[1]]
-        pollResp = handler(cmdpath[2:])
+
+        #We assume that all functions are of the 'wait' type (except poll and reset_all)
         if cmdpath[1] == "poll":
+            #Make sure that we can return reporter values
+            ScratchHTTPHandler.canReturnReporterValues.wait()
+            pollResp = handler(cmdpath[2:])
             message_parts = []
             message_parts.append('')
             message_parts.append(pollResp)
             message = '\r\n'.join(message_parts)
+        elif cmdpath[1] == "reset_all":
+            #Just carry on as normal
+            handler(cmdpath[2:])
+        else:
+            #Let other threads know that we're processing a wait command
+            #This stops the poll command from returning a value before we return _Busy
+            ScratchHTTPHandler.canReturnReporterValues.clear()
+
+            #This is a wait type function so parse out the command id
+            ScratchHTTPHandler.lastCommandId = str(cmdpath[2])
+
+            handler(cmdpath[3:])
+
         self.send_response(200)
         self.end_headers()
         self.wfile.write(message)
+        ScratchHTTPHandler.canReturnReporterValues.set()
         return
 
 
@@ -119,6 +145,8 @@ class ScratchHTTPHandler( BaseHTTPServer.BaseHTTPRequestHandler ):
             (key, value) = ScratchHTTPHandler.httpRobotSimulator.reporterValuesQueue.get_nowait()
 
             strKey = str(key)
+            strValue = str(value)
+
             #Apply transformations to reporter values to convert from old block format to the new format
             match = re.match(r'artifact(X|Y|BearingDegrees)', strKey)
             if match:
@@ -148,6 +176,16 @@ class ScratchHTTPHandler( BaseHTTPServer.BaseHTTPRequestHandler ):
             ScratchHTTPHandler.reporter_values[key] = value
 
         for key,value in ScratchHTTPHandler.reporter_values.iteritems():
+            strKey = str(key)
+            strValue = str(value)
+
+            #Check if the last command is still running
+            if ScratchHTTPHandler.lastCommandId > -1:
+                if strKey == 'allCommandsComplete':
+                    if strValue == '0' and ScratchHTTPHandler.lastCommandId > -1:
+                        key = "_busy"
+                        value = ScratchHTTPHandler.lastCommandId
+
             reporter_txt = "{0} {1}".format(str(key), str(value))
             message_parts.append(reporter_txt)
             logging.debug('Sending back reporter key/value: %s', reporter_txt);
