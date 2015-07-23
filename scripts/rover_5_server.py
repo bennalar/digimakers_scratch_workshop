@@ -5,6 +5,7 @@ import time
 import multiprocessing
 import sys
 import subprocess
+
 import RPIO
 import RPIO.PWM
 
@@ -13,100 +14,17 @@ BLUETOOTH_SERIAL_BAUD_RATE = 9600
 MINI_DRIVER_SERIAL_PORT = "/dev/ttyUSB0"
 MINI_DRIVER_SERIAL_BAUD_RATE = 9600
 
-PWM_FREQUENCY = 50    # Hz
+HW_RECORD_LEN = 7 # number of fields returned from the hardware device
+HW_RECORD_FIELD_LEFT_ENCODER = 0
+HW_RECORD_FIELD_RIGHT_ENCODER = 1
+HW_RECORD_FIELD_SONAR_DISTANCE_CM = 2
+HW_RECORD_FIELD_FRONT_LEFT_IR = 3
+HW_RECORD_FIELD_FRONT_RIGHT_IR = 4
+HW_RECORD_FIELD_REAR_LEFT_IR = 5
+HW_RECORD_FIELD_REAR_RIGHT_IR = 6
 
-PWM_DMA_CHANNEL = 0
-PWM_SUBCYLCLE_TIME_US = 1000/PWM_FREQUENCY * 1000
-PWM_PULSE_INCREMENT_US = 10
-
-PAN_PWM_PIN = 23
-TILT_PWM_PIN = 18
-
-#---------------------------------------------------------------------------------------------------
-class ServoPWM:
-    
-    ABSOLUTE_MIN_PULSE_WIDTH_US = 500
-    ABSOLUTE_MAX_PULSE_WIDTH_US = 2500
-    
-    #-----------------------------------------------------------------------------------------------
-    def __init__( self, pwmPin, minAnglePulseWidthPair, 
-        midAnglePulseWidthPair, maxAnglePulseWidthPair ):
-        
-        # Check that the given angles are valid
-        assert( minAnglePulseWidthPair[ 0 ] >= 0 )
-        assert( midAnglePulseWidthPair[ 0 ] > minAnglePulseWidthPair[ 0 ] )
-        assert( midAnglePulseWidthPair[ 0 ] < maxAnglePulseWidthPair[ 0 ] )
-        assert( maxAnglePulseWidthPair[ 0 ] <= 180 )
-        
-        self.pwmPin = pwmPin
-        self.minAnglePulseWidthPair = minAnglePulseWidthPair
-        self.midAnglePulseWidthPair = midAnglePulseWidthPair
-        self.maxAnglePulseWidthPair = maxAnglePulseWidthPair
-        self.lastPulseWidthSet = None
-    
-    #-----------------------------------------------------------------------------------------------
-    def setCommand( self, command ):
-        
-        # Work out whether the command is an angle, or a pulse width
-        if command >= self.ABSOLUTE_MIN_PULSE_WIDTH_US:
-            self.setPulseWidth( command )
-        else:
-            self.setAngle( command )
-    
-    #-----------------------------------------------------------------------------------------------
-    def setPulseWidth( self, pulseWidth ):
-        
-        # Constrain the pulse width
-        if pulseWidth < self.ABSOLUTE_MIN_PULSE_WIDTH_US:
-            pulseWidth = self.ABSOLUTE_MIN_PULSE_WIDTH_US
-        if pulseWidth > self.ABSOLUTE_MAX_PULSE_WIDTH_US:
-            pulseWidth = self.ABSOLUTE_MAX_PULSE_WIDTH_US
-        
-        # Ensure that the pulse width is an integer multiple of the smallest 
-        # possible pulse increment
-        pulseIncrementUS = RPIO.PWM.get_pulse_incr_us()
-        numPulsesNeeded = int( pulseWidth/pulseIncrementUS )
-        pulseWidth = numPulsesNeeded * pulseIncrementUS
-    
-        if pulseWidth != self.lastPulseWidthSet:
-        
-            RPIO.PWM.add_channel_pulse( PWM_DMA_CHANNEL, self.pwmPin, 0, numPulsesNeeded )
-            self.lastPulseWidthSet = pulseWidth
-    
-    #-----------------------------------------------------------------------------------------------
-    def setAngle( self, angle ):
-        
-        # Constrain the angle
-        if angle < self.minAnglePulseWidthPair[ 0 ]:
-            angle = self.minAnglePulseWidthPair[ 0 ]
-        if angle > self.maxAnglePulseWidthPair[ 0 ]:
-            angle = self.maxAnglePulseWidthPair[ 0 ]
-            
-        # Convert the angle to a pulse width using linear interpolation
-        if angle < self.midAnglePulseWidthPair[ 0 ]:
-            
-            angleDiff = self.midAnglePulseWidthPair[ 0 ] - self.minAnglePulseWidthPair[ 0 ]
-            startPulseWidth = self.minAnglePulseWidthPair[ 1 ]
-            pulseWidthDiff = self.midAnglePulseWidthPair[ 1 ] - self.minAnglePulseWidthPair[ 1 ]
-            
-            interpolation = float( angle - self.minAnglePulseWidthPair[ 0 ] ) / angleDiff
-            
-            pulseWidth = startPulseWidth + interpolation*pulseWidthDiff
-            
-        else:
-            
-            angleDiff = self.maxAnglePulseWidthPair[ 0 ] - self.midAnglePulseWidthPair[ 0 ]
-            startPulseWidth = self.midAnglePulseWidthPair[ 1 ]
-            pulseWidthDiff = self.maxAnglePulseWidthPair[ 1 ] - self.midAnglePulseWidthPair[ 1 ]
-            
-            interpolation = float( angle - self.midAnglePulseWidthPair[ 0 ] ) / angleDiff
-            
-            pulseWidth = startPulseWidth + interpolation*pulseWidthDiff
-        
-        print "Converted angle {0} to pulse width {1}".format( angle, pulseWidth )
-        
-        # Now set the pulse width
-        self.setPulseWidth( pulseWidth )
+#Ensure that our record length is consistent with the number of fields
+assert( HW_RECORD_LEN -1 == HW_RECORD_FIELD_REAR_RIGHT_IR)
 
 #---------------------------------------------------------------------------------------------------
 class ProcessBase( multiprocessing.Process ):
@@ -255,50 +173,50 @@ class StateReporter( ProcessBase ):
         self.lastDetectionId = -1
         self.detectedArtifactId = -1
         self.detectedArtifactHeadingDegrees = 0.0
-    
-    #---------------------------------------------------------------------------------------------------
-    def readDistanceFromSonarCM( self ):
-        
-        distance = 0.0
-        
-        # Send the start signal
-        RPIO.setup( self.SONAR_PIN, RPIO.OUT )
-        RPIO.output( self.SONAR_PIN, RPIO.LOW )
-        #time.sleep( 0.00002 )
-        
-        RPIO.output( self.SONAR_PIN, RPIO.HIGH )
-        time.sleep( 0.00001 )
-        RPIO.output( self.SONAR_PIN, RPIO.LOW )
-        
-        # Prepare to receive the response
-        RPIO.setup( self.SONAR_PIN, RPIO.IN, pull_up_down=RPIO.PUD_DOWN )
-        
-        # TODO: It would be nicer to use interrupts here, but I can't get them to work just yet...  
-        waitStartTime = time.time()
-        pulseStartTime = time.time()
-        while RPIO.input( self.SONAR_PIN ) == 0:
-            curTime = time.time()
-            pulseStartTime = curTime
-            
-            if curTime - waitStartTime > self.SONAR_TIMEOUT:
-                return self.MAX_SONAR_DISTANCE_CM
 
-        pulseEndTime = curTime = time.time()
-        while RPIO.input( self.SONAR_PIN ) == 1:
-            curTime = time.time()
-            pulseEndTime = curTime
-            
-            if curTime - waitStartTime > self.SONAR_TIMEOUT:
-                return self.MAX_SONAR_DISTANCE_CM
-        
-        measuredTimeUS = (pulseEndTime - pulseStartTime)*1000000.0
-        distanceCM = int( measuredTimeUS / 58.0 )   # Using formula on http://www.seeedstudio.com/wiki/Ultra_Sonic_range_measurement_module
-        
-        if distanceCM > self.MAX_SONAR_DISTANCE_CM:
-            distanceCM = self.MAX_SONAR_DISTANCE_CM
-        
-        return distanceCM
-    
+    # #---------------------------------------------------------------------------------------------------
+    # def readDistanceFromSonarCM( self ):
+    #
+    #     distance = 0.0
+    #
+    #     # Send the start signal
+    #     RPIO.setup( self.SONAR_PIN, RPIO.OUT )
+    #     RPIO.output( self.SONAR_PIN, RPIO.LOW )
+    #     #time.sleep( 0.00002 )
+    #
+    #     RPIO.output( self.SONAR_PIN, RPIO.HIGH )
+    #     time.sleep( 0.00001 )
+    #     RPIO.output( self.SONAR_PIN, RPIO.LOW )
+    #
+    #     # Prepare to receive the response
+    #     RPIO.setup( self.SONAR_PIN, RPIO.IN, pull_up_down=RPIO.PUD_DOWN )
+    #
+    #     # TODO: It would be nicer to use interrupts here, but I can't get them to work just yet...
+    #     waitStartTime = time.time()
+    #     pulseStartTime = time.time()
+    #     while RPIO.input( self.SONAR_PIN ) == 0:
+    #         curTime = time.time()
+    #         pulseStartTime = curTime
+    #
+    #         if curTime - waitStartTime > self.SONAR_TIMEOUT:
+    #             return self.MAX_SONAR_DISTANCE_CM
+    #
+    #     pulseEndTime = curTime = time.time()
+    #     while RPIO.input( self.SONAR_PIN ) == 1:
+    #         curTime = time.time()
+    #         pulseEndTime = curTime
+    #
+    #         if curTime - waitStartTime > self.SONAR_TIMEOUT:
+    #             return self.MAX_SONAR_DISTANCE_CM
+    #
+    #     measuredTimeUS = (pulseEndTime - pulseStartTime)*1000000.0
+    #     distanceCM = int( measuredTimeUS / 58.0 )   # Using formula on http://www.seeedstudio.com/wiki/Ultra_Sonic_range_measurement_module
+    #
+    #     if distanceCM > self.MAX_SONAR_DISTANCE_CM:
+    #         distanceCM = self.MAX_SONAR_DISTANCE_CM
+    #
+    #     return distanceCM
+
     #-----------------------------------------------------------------------------------------------
     def run( self ):
         
@@ -325,20 +243,22 @@ class StateReporter( ProcessBase ):
                     
                 # Extract the current status of the robot from the last line                
                 statusItems = statusData.split()
-                if len( statusItems ) >= 2:
+                if len( statusItems ) >= HW_RECORD_LEN:
                     
                     try:
-                        self.leftEncoderCount = int( statusItems[ 0 ] )
-                        self.rightEncoderCount = int( statusItems[ 1 ] )
+                        self.leftEncoderCount = int( statusItems[ HW_RECORD_FIELD_LEFT_ENCODER ] )
+                        self.rightEncoderCount = int( statusItems[ HW_RECORD_FIELD_RIGHT_ENCODER ] )
+                        self.sonarDistanceCM = int( statusItems[ HW_RECORD_FIELD_SONAR_DISTANCE_CM ] )
+                        # self.irSensorFrontLeft = int( statusItems[ HW_RECORD_FIELD_FRONT_LEFT_IR ] )
+                        # self.irSensorFrontRight = int( statusItems[ HW_RECORD_FIELD_FRONT_RIGHT_IR ] )
+                        # self.irSensorRearLeft = int( statusItems[ HW_RECORD_FIELD_REAR_LEFT_IR ] )
+                        # self.irSensorRearRight = int( statusItems[ HW_RECORD_FIELD_REAR_RIGHT_IR ] )
                     except:
                         pass    # Ignore parsing errors
-            
-            # Read from the sonar sensor
-            self.sonarDistanceCM = self.readDistanceFromSonarCM()
-            
+
+
             # Get the latest detection result if it exists
             if not self.detectionResultQueue.empty():
-                
                 detectionResult = self.detectionResultQueue.get_nowait()
                 self.lastDetectionId, self.detectedArtifactId, self.detectedArtifactHeadingDegrees = detectionResult
             
@@ -399,12 +319,12 @@ class CommandHandler( ProcessBase ):
             
             # Read commands from bluetooth
             while self.bluetoothSerial.inWaiting():
-                
                 command = self.bluetoothSerial.read()
+                print "Received command %s from bluetooth" % command
                 if command in self.COMMAND_STATE_DICT:
                     self.roverState = self.COMMAND_STATE_DICT[ command ]
                 elif command == "u":
-                    
+
                     self.buzzerActive = True
                     self.buzzerStartTime = time.time()
                 elif command == "p":
@@ -434,24 +354,24 @@ class CommandHandler( ProcessBase ):
                 self.miniDriverSerial.write( "b" )
                 
             else:
-                
+
                 # Should never get here, but switch back to stopped state if we do
                 self.roverState = "Stopped"
                 self.miniDriverSerial.write( "s" )
-            
+
             # Update the buzzer
-            if self.buzzerActive: 
+            if self.buzzerActive:
                 if time.time() - self.buzzerStartTime > self.BUZZER_TIME:
                     self.buzzerActive = False
-                    
+
             if self.buzzerActive:
-                
+
                 # Buzzer on
                 RPIO.output( self.BUZZER_PIN, RPIO.HIGH )
                 RPIO.output( self.BUZZER_LED_PIN, RPIO.HIGH )
-                
+
             else:
-                
+
                 # Buzzer off
                 RPIO.output( self.BUZZER_PIN, RPIO.LOW )
                 RPIO.output( self.BUZZER_LED_PIN, RPIO.LOW )
@@ -473,39 +393,23 @@ def cleanupProcesses( processes ):
                 
 #---------------------------------------------------------------------------------------------------
 if __name__ == '__main__':
-    
-    # Create ServoPWM instances to control the servos
-    #panServoPWM = ServoPWM( PAN_PWM_PIN, 
-        #minAnglePulseWidthPair=( 45.0, 1750 ), 
-        #midAnglePulseWidthPair=( 90.0, 1200 ), 
-        #maxAnglePulseWidthPair=( 135.0, 700.0 ) )
-    #tiltServoPWM = ServoPWM( TILT_PWM_PIN, 
-        #minAnglePulseWidthPair=( 45.0, 1850 ), 
-        #midAnglePulseWidthPair=( 90.0, 1500 ), 
-        #maxAnglePulseWidthPair=( 180.0, 500.0 ) )
 
     ## Setup RPIO, and prepare for PWM signals
     RPIO.setmode( RPIO.BCM )
-
-    #RPIO.PWM.setup( pulse_incr_us=PWM_PULSE_INCREMENT_US )
-    #RPIO.PWM.init_channel( PWM_DMA_CHANNEL, PWM_SUBCYLCLE_TIME_US )
-    
-    #panServoPWM.setAngle( 90.0 )
-    #tiltServoPWM.setAngle( 90.0 )
     
     bluetoothSerial = serial.Serial( BLUETOOTH_SERIAL_PORT, baudrate=BLUETOOTH_SERIAL_BAUD_RATE, timeout=0 )
     miniDriverSerial = serial.Serial( MINI_DRIVER_SERIAL_PORT, baudrate=MINI_DRIVER_SERIAL_BAUD_RATE, timeout=0 )
 
     # Wait until we hear from the mini driver
-    print "Waiting for mini driver..."
+    print "Waiting for connection to mini driver..."
     time.sleep( 12.0 )
     
     while miniDriverSerial.inWaiting() == 0:
-        
         pass
-    
+    print "Mini driver connected!"
+
     # Create processes
-    print "Starting up..."
+    print "Starting up robot server..."
     
     commandQueue = multiprocessing.Queue()
     detectionResultQueue = multiprocessing.Queue()
@@ -517,6 +421,7 @@ if __name__ == '__main__':
     artifactDetector.start()
     stateReporter.start()
     commandHandler.start()
+    print "Robot server running! Enjoy..."
     
     while True:
         
@@ -526,11 +431,6 @@ if __name__ == '__main__':
             
         except KeyboardInterrupt:
             cleanupProcesses( ( artifactDetector, stateReporter, commandHandler ) )
-            
-            #RPIO.PWM.clear_channel_gpio( PWM_DMA_CHANNEL, panServoPWM.pwmPin )
-            #RPIO.PWM.clear_channel_gpio( PWM_DMA_CHANNEL, tiltServoPWM.pwmPin )
-            
-            #RPIO.PWM.cleanup()
             RPIO.cleanup()
             sys.exit()
 
