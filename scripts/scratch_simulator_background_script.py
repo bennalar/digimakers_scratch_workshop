@@ -177,13 +177,14 @@ class RobotSimulator( scratch_background.ScratchBase ):
         self.buzzerOn = False
         self.curCommand = None
         self.allCommandsComplete = False
+        self.artifactID = -1
         
         self.lastRoverXSent = -10000
         self.lastRoverYSent = -10000
         self.lastRoverHeadingDegreesSent = -10000
         self.lastBuzzerOnSent = -10000
         self.lastUltrasonicRangeCMSent = -10000
-        self.lastArtifactIDSent = -10000
+        self.lastArtifactIDSent = self.artifactID
         self.lastArtifactBearingDegreesSent = -10000
         self.lastAllCommandsCompleteSent = -10000
         self.lastArtifactSent = None
@@ -192,6 +193,8 @@ class RobotSimulator( scratch_background.ScratchBase ):
         self.distanceToMove = 0
         self.degreesToTurn = 0
         self.degreesTurned = 0
+        self.sendObstacles = True
+
         
         if random.random() < 0.5:
             
@@ -231,7 +234,7 @@ class RobotSimulator( scratch_background.ScratchBase ):
     
     #-----------------------------------------------------------------------------------------------
     def run( self ):
-        
+
         while not self.stopped():
 
             loopStartTime = time.time()
@@ -241,9 +244,8 @@ class RobotSimulator( scratch_background.ScratchBase ):
                 
                 newCommand = self.commandQueue.get_nowait()
                 newCommand = newCommand.strip().lower()
-                
+                print "Processing command %s"%newCommand
                 if newCommand == "reset":
-                    
                     self.reset()
                 
                 elif newCommand == "stop":
@@ -443,7 +445,15 @@ class RobotSimulator( scratch_background.ScratchBase ):
                     self.sendSensorUpdate( "artifactX", self.artifact.posX )
                     self.sendSensorUpdate( "artifactY", self.artifact.posY )
                     self.lastArtifactSent = self.artifact
-                
+
+                if self.sendObstacles:
+                    self.sendObstacles = False
+                    for i, obstacle in enumerate( self.OBSTACLES ):
+                        self.sendSensorUpdate( "Obstacle_{0}_X".format( i + 1 ), obstacle.posX )
+                        self.sendSensorUpdate( "Obstacle_{0}_Y".format( i + 1 ), obstacle.posY )
+                        self.sendSensorUpdate( "Obstacle_{0}_HeadingDegrees".format( i + 1 ), obstacle.headingDegrees )
+
+
                 if self.allCommandsComplete != self.lastAllCommandsCompleteSent:
                     
                     if self.allCommandsComplete:
@@ -452,13 +462,8 @@ class RobotSimulator( scratch_background.ScratchBase ):
                         self.sendSensorUpdate( "allCommandsComplete", 0 )
                         
                     self.lastAllCommandsCompleteSent = self.allCommandsComplete
-                
-                #for i, obstacle in enumerate( self.OBSTACLES ):
-                    
-                    #self.sendSensorUpdate( "Obstacle_{0}_X".format( i + 1 ), obstacle.posX )
-                    #self.sendSensorUpdate( "Obstacle_{0}_Y".format( i + 1 ), obstacle.posY )
-                    #self.sendSensorUpdate( "Obstacle_{0}_HeadingDegrees".format( i + 1 ), obstacle.headingDegrees )
-                
+
+
                 self.timeOfLastSensorUpdate = curTime
                 
             loopEndTime = time.time()
