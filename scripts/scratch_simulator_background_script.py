@@ -145,12 +145,12 @@ class RobotSimulator( scratch_background.ScratchBase ):
         self.artifactID = -1
         self.artifactBearingDegrees = 0.0
         
-        for i, obstacle in enumerate( self.OBSTACLES ):
-                    
-            print "Obstacle_{0}_X".format( i + 1 ), obstacle.posX
-            print "Obstacle_{0}_Y".format( i + 1 ), obstacle.posY
-            print "Obstacle_{0}_HeadingDegrees".format( i + 1 ), obstacle.headingDegrees
-        
+#         for i, obstacle in enumerate( self.OBSTACLES ):
+#                     
+#             print "Obstacle_{0}_X".format( i + 1 ), obstacle.posX
+#             print "Obstacle_{0}_Y".format( i + 1 ), obstacle.posY
+#             print "Obstacle_{0}_HeadingDegrees".format( i + 1 ), obstacle.headingDegrees
+#         
         
         self.reset()
     
@@ -243,8 +243,8 @@ class RobotSimulator( scratch_background.ScratchBase ):
             if not self.commandQueue.empty():
                 
                 newCommand = self.commandQueue.get_nowait()
-                newCommand = newCommand.strip().lower()
-                print "Processing command %s"%newCommand
+                newCommand = str(newCommand.strip().lower())
+                print ("Processing command {0}".format(newCommand))
                 if newCommand == "reset":
                     self.reset()
                 
@@ -262,7 +262,7 @@ class RobotSimulator( scratch_background.ScratchBase ):
                     
                     if self.allCommandsComplete == True or self.curCommand != None:
                         
-                        print "Ignoring command ({0}) as we're not ready for it".format( newCommand )
+                        print ("Ignoring command ({0}) as we're not ready for it".format( newCommand ))
             
                     else:
                         
@@ -378,7 +378,7 @@ class RobotSimulator( scratch_background.ScratchBase ):
                         distanceToArtifact = math.sqrt( artifactVecX**2 + artifactVecY**2 )
                         if distanceToArtifact <= self.MAX_ARTIFACT_DISTANCE:
                             
-                            print "Artifact close"
+                            print ("Artifact close")
                             
                             self.artifactID = self.artifact.artifactID
                             self.artifactBearingDegrees = 0.0
@@ -484,8 +484,8 @@ class RobotSimulator( scratch_background.ScratchBase ):
             self.sendScratchCommand( command )
         except IOError as e:
 
-            print "Exception when trying to send update"
-            print e
+            print ("Exception when trying to send update")
+            print (e)
 
             if e.errno == errno.EPIPE:
          
@@ -506,19 +506,22 @@ if __name__ == '__main__':
         host = scratch_background.DEFAULT_HOST
 
     scratch_background.cycle_trace = 'start'
+    
+    global listener
+    global robot
 
     while True:
         if (scratch_background.cycle_trace == 'disconnected'):
-            print "Scratch disconnected"
+            print ("Scratch disconnected")
             scratch_background.cleanupProcesses( ( listener, robotSimulator ) )
             time.sleep(1)
             scratch_background.cycle_trace = 'start'
 
         if (scratch_background.cycle_trace == 'start'):
             # open the socket
-            print 'Starting to connect...' ,
+            print ('Starting to connect...') ,
             scratchSocket = scratch_background.createSocket( host, scratch_background.PORT )
-            print 'Connected!'
+            print ('Connected!')
             scratchSocket.settimeout( scratch_background.SOCKET_TIMEOUT )
             
             commandQueue = multiprocessing.Queue()
@@ -526,7 +529,7 @@ if __name__ == '__main__':
             robotSimulator = RobotSimulator( scratchSocket, commandQueue )
             
             scratch_background.cycle_trace = 'running'
-            print "Running...."
+            print ("Running....")
             listener.start()
             robotSimulator.start()
 
