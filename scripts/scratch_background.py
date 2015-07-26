@@ -82,7 +82,7 @@ class ScratchListener( ScratchBase ):
                 #print "Error timeout in receiver"
                 continue
 
-            print "got packet", packet
+            print ("got packet", packet)
 
             if packet.startswith('sensor-update'):
                 #get sensor_name and sensor_value
@@ -113,7 +113,7 @@ class ScratchListener( ScratchBase ):
                 m = packet[11:-1].lower()
                 #print 'message = ' + m
 
-                print "m is", m
+                print ("m is", m)
 
                 self.commandQueue.put( m )
 
@@ -121,13 +121,13 @@ class ScratchListener( ScratchBase ):
 def createSocket(host, port):
     while True:
         try:
-            print 'Trying'
+            print ('Trying')
             scratch_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             scratch_sock.connect((host, port))
             break
         except socket.error:
-            print "Error connecting to Scratch!"
-            print "No Mesh session at host: %s, port: %s please Enable remote sensor connections." % (host, port) 
+            print ("Error connecting to Scratch!")
+            print ("No Mesh session at host: %s, port: %s please Enable remote sensor connections." % (host, port))
             time.sleep(3)
 
     return scratch_sock
