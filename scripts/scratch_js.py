@@ -8,11 +8,11 @@ import scratch_simulator_background_script
 import multiprocessing
 import logging
 import scratch_rover_5_background_script
-import serial
+import py_websockets_bot
 
 #Constants - should be shared amongst all python scripts
 PREPARE_FOR_COMMAND_CMD = "prepareforcommand"
-MODE_BLUETOOTH = 'bluetooth'
+MODE_LIVE = 'live'
 MODE_SIMULATOR = 'simulator'
 RESET_CMD = "reset"
 DETECT_ARTIFACT_CMD = "detectartifact"
@@ -21,14 +21,14 @@ TURN_CMD = "turn"
 ALL_CMDS_COMPLETE = "allCommandsComplete"
 REPORTER_CMD = "reporter"
 REPORTER_RESULT_CMD = "reporterResult"
-HOST_NAME = 'localhost'
+
+#Hostname of the remote robot that we will control in the live mode
+ROBOT_REMOTE_HOST = 'localhost'
+
+#Port number that scratch will connect to
 WEBSOCKETS_PORT_NUMBER = 42004
 
-BLUETOOTH_SERIAL_PORT = "/dev/rfcomm2"
-BLUETOOTH_SERIAL_BAUD_RATE = 9600
-
 global logging
-
 
 # Extends existing simulator to cache the sensor results
 class JSRobotSimulator( scratch_simulator_background_script.RobotSimulator ):
@@ -53,8 +53,8 @@ class JSRobotSimulator( scratch_simulator_background_script.RobotSimulator ):
 # Extends existing controller to cache the sensor results
 class JSRobotController( scratch_rover_5_background_script.RobotController):
 
-    def __init__( self, commandQueue, reporterValuesQueue,  completedCommandsQueue, bluetoothSerial):
-        scratch_rover_5_background_script.RobotController.__init__(self, None, commandQueue, bluetoothSerial )
+    def __init__( self, commandQueue, reporterValuesQueue,  completedCommandsQueue, robot):
+        scratch_rover_5_background_script.RobotController.__init__(self, None, commandQueue, robot )
         self.reporterValuesQueue = reporterValuesQueue
         self.completedCommandsQueue = completedCommandsQueue
 
@@ -120,20 +120,13 @@ if __name__ == '__main__':
 
     subparsers = parser.add_subparsers(dest='mode')
     simulatorParser = subparsers.add_parser(MODE_SIMULATOR)
-    bluetoothParser = subparsers.add_parser(MODE_BLUETOOTH)
-    bluetoothParser.add_argument(
-        '-p', '--port',
-        help="Bluetooth serial port",
-        dest="port",
-        default=BLUETOOTH_SERIAL_PORT,
+    liveModeParser = subparsers.add_parser(MODE_LIVE)
+    liveModeParser.add_argument(
+        '--host',
+        help="Remote Robot Hostname",
+        dest="remoteRobotHostname",
+        default=ROBOT_REMOTE_HOST,
         required=True,
-    )
-    bluetoothParser.add_argument(
-        '-b', '--baudrate',
-        help="Bluetooth baud rate",
-        dest="baudrate",
-        default=BLUETOOTH_SERIAL_BAUD_RATE,
-        type=int,
     )
 
     args = parser.parse_args()
@@ -153,9 +146,9 @@ if __name__ == '__main__':
 
     if args.mode == MODE_SIMULATOR:
         httpRobotSimulator = JSRobotSimulator(commandQueue, reporterValuesQueue, completedCommandsQueue)
-    elif args.mode == MODE_BLUETOOTH:
-        bluetoothSerial = serial.Serial( args.port, args.baudrate, timeout=0 )
-        httpRobotSimulator = JSRobotController(commandQueue, reporterValuesQueue, completedCommandsQueue, bluetoothSerial)
+    elif args.mode == MODE_LIVE:
+        robot = py_websockets_bot.WebsocketsBot( args.remoteRobotHostname )
+        httpRobotSimulator = JSRobotController(commandQueue, reporterValuesQueue, completedCommandsQueue, robot)
     else:
         raise "Unrecognised mode"
 

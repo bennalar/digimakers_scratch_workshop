@@ -4,14 +4,13 @@
 # derived from Simon Walters under GPL v2
 # derived from scratch_handler by Thomas Preston
 
-import socket
 import time
 import sys
 import errno
 import multiprocessing
 import math
-import serial
 import scratch_background
+import py_websockets_bot
 
 #---------------------------------------------------------------------------------------------------
 class RobotController( scratch_background.ScratchBase ):
@@ -25,15 +24,21 @@ class RobotController( scratch_background.ScratchBase ):
     
     MAX_ULTRASONIC_RANGE_CM = 400
     TIME_FOR_BEEP = 0.4
-    MAX_TIME_TO_WAIT_FOR_ARTIFACT_DETECTION = 30.0
+    MAX_TIME_TO_WAIT_FOR_ARTIFACT_DETECTION = 10.0
     MAX_NUM_BEEPS = 9
+
+    MAX_MOTOR_SPEED = 60
+
+    #Return labels for sensors from the robot API
+    ROVER5_ENCODERS_SENSOR_NAME = "encoders"
+    ROVER5_ULTRASONIC_SENSOR_NAME = "ultrasonic"
     
     #-----------------------------------------------------------------------------------------------
-    def __init__( self, socket, commandQueue, bluetoothSerial ):
+    def __init__( self, socket, commandQueue, robot ):
         scratch_background.ScratchBase.__init__( self, socket )
         
         self.commandQueue = commandQueue
-        self.bluetoothSerial = bluetoothSerial
+        self.robot = robot
         self.timeOfLastControlStep = time.time()
         self.timeOfLastSensorUpdate = time.time()
         self.numStatusMessagesReceived = 0
@@ -84,42 +89,42 @@ class RobotController( scratch_background.ScratchBase ):
     
     #-----------------------------------------------------------------------------------------------
     def getRoverStatusMessages( self ):
-        
+
         oldLeftEncoderCount = self.leftEncoderCount
         oldRightEncoderCount = self.rightEncoderCount
-        
+
         # Check for status messages from the rover
-        numBytesAvailable = self.bluetoothSerial.inWaiting()
-        if numBytesAvailable > 0:
-            
-            self.serialBuffer += self.bluetoothSerial.read( numBytesAvailable )
-            
-            statusData = ""
-            endOfLinePos = self.serialBuffer.find( "\n" )
-            
-            while endOfLinePos != -1:
-                
-                # Remove lines found in the serial data
-                statusData = self.serialBuffer[ :endOfLinePos ]
-                self.serialBuffer = self.serialBuffer[ endOfLinePos + 1: ]
-                
-                endOfLinePos = self.serialBuffer.find( "\n" )
-                
-            # Extract the current status of the robot from the last line                
-            statusItems = statusData.split()
-            if len( statusItems ) >= 6:
-                
-                try:
-                    self.leftEncoderCount = int( statusItems[ 0 ] )
-                    self.rightEncoderCount = int( statusItems[ 1 ] )
-                    self.ultrasonicRangeCM = int( statusItems[ 2 ] )
-                    self.lastDetectionID = int( statusItems[ 3 ] )
-                    self.artifactID = int( statusItems[ 4 ] )
-                    self.artifactBearingDegrees = float( statusItems[ 5 ] )
-                    
-                    self.numStatusMessagesReceived += 1
-                except:
-                    pass    # Ignore parsing errors
+        self.robot.update()
+
+        status_dict, read_time = self.robot.get_robot_status_dict()
+        if not "sensors" in status_dict:
+
+            print "No sensor readings..."
+
+        else:
+            self.numStatusMessagesReceived = self.numStatusMessagesReceived + 1
+
+            # Get each sensor reading in turn
+            sensor_dict = status_dict[ "sensors" ]
+            for sensor_name in sensor_dict:
+
+                # Get the timestamp and data for the reading
+                timestamp = sensor_dict[ sensor_name ][ "timestamp" ]
+                data = sensor_dict[ sensor_name ][ "data" ]
+
+                if sensor_name == RobotController.ROVER5_ULTRASONIC_SENSOR_NAME:
+                    self.ultrasonicRangeCM = data
+                elif sensor_name == RobotController.ROVER5_ENCODERS_SENSOR_NAME:
+                    self.leftEncoderCount = data[0]
+                    self.rightEncoderCount = data[1]
+                #else: Ignore for the moment but we may want to send these back at a later date
+
+                    # self.leftEncoderCount = int( statusItems[ 0 ] )
+                    # self.rightEncoderCount = int( statusItems[ 1 ] )
+                    # self.ultrasonicRangeCM = int( statusItems[ 2 ] )
+                    # self.lastDetectionID = int( statusItems[ 3 ] )
+                    # self.artifactID = int( statusItems[ 4 ] )
+                    # self.artifactBearingDegrees = float( statusItems[ 5 ] )
                     
             # Update the robot position from any change to the status message            
             leftEncoderDiff = self.leftEncoderCount - oldLeftEncoderCount
@@ -220,7 +225,49 @@ class RobotController( scratch_background.ScratchBase ):
                         
                         self.curCommand = "detectartifact"
                         self.waitingForDetectionToComplete = False
-    
+
+
+
+    # List of commands that should be implemented by the child implementation of the scratch environment
+    # This could be extended to be another class (i.e. RobotControllerProxy) to allow different ways to
+    # communicate to the robot in the live implementation
+
+    #---------------------------------------------------------------------------------------------------
+    def sendMoveForwardCmd( self ):
+        self.robot.set_motor_speeds( RobotController.MAX_MOTOR_SPEED,
+                                     RobotController.MAX_MOTOR_SPEED )
+
+    #---------------------------------------------------------------------------------------------------
+    def sendMoveReverseCmd( self ):
+        self.robot.set_motor_speeds( -RobotController.MAX_MOTOR_SPEED,
+                                     -RobotController.MAX_MOTOR_SPEED )
+
+    #---------------------------------------------------------------------------------------------------
+    def sendTurnLeftCmd( self ):
+        self.robot.set_motor_speeds( -RobotController.MAX_MOTOR_SPEED,
+                                     RobotController.MAX_MOTOR_SPEED )
+
+    #---------------------------------------------------------------------------------------------------
+    def sendTurnRightCmd( self ):
+        self.robot.set_motor_speeds( RobotController.MAX_MOTOR_SPEED,
+                                     -RobotController.MAX_MOTOR_SPEED )
+
+    #---------------------------------------------------------------------------------------------------
+    def sendStopCmd( self ):
+        self.robot.set_motor_speeds( 0, 0 )
+
+    #---------------------------------------------------------------------------------------------------
+    def sendDetectArtifactCmd( self ):
+        #ignore for the moment
+        #TODO code this bit up - openCV? Run on server?
+        self.waitingForDetectionToComplete = False
+
+    #---------------------------------------------------------------------------------------------------
+    def sendBeepCmd( self ):
+        #ignore for the moment
+        #TODO code this bit up - need to adapt server code
+        self.waitingForBeepToComplete = False
+
     #-----------------------------------------------------------------------------------------------
     def updateControlLoop( self ):
         
@@ -246,7 +293,7 @@ class RobotController( scratch_background.ScratchBase ):
                         
                     else:
                         
-                        self.bluetoothSerial.write( "f" )
+                        self.sendMoveForwardCmd()
                         
                 else:
                     
@@ -259,7 +306,7 @@ class RobotController( scratch_background.ScratchBase ):
                         
                     else:
                         
-                        self.bluetoothSerial.write( "b" )
+                        self.sendMoveReverseCmd()
                 
                 if moveComplete:
                     self.curCommand = None
@@ -281,7 +328,7 @@ class RobotController( scratch_background.ScratchBase ):
                         
                     else:
                         
-                        self.bluetoothSerial.write( "r" )
+                        self.sendTurnRightCmd()
                         
                 else:
                     
@@ -294,7 +341,7 @@ class RobotController( scratch_background.ScratchBase ):
                         
                     else:
                         
-                        self.bluetoothSerial.write( "l" )
+                        self.sendTurnLeftCmd()
                 
                 if turnComplete:
                     self.curCommand = None
@@ -317,7 +364,7 @@ class RobotController( scratch_background.ScratchBase ):
                     
                     if not self.waitingForBeepToComplete:
                         # Send a beep command
-                        self.bluetoothSerial.write( "u" )
+                        self.sendBeepCmd()
                         self.waitingForBeepToComplete = True
                         self.timeBeepStarted = time.time()
                         
@@ -336,36 +383,34 @@ class RobotController( scratch_background.ScratchBase ):
                     
                     # Send a detection command
                     self.waitStartDetectionID = self.lastDetectionID
-                    self.bluetoothSerial.write( "p" )
+                    self.sendDetectArtifactCmd()
                     self.waitingForDetectionToComplete = True
                     self.timeDetectionStarted = time.time()
                 
             else:
                 
-                self.bluetoothSerial.write( "s" )
+                self.sendStopCmd()
             
             self.timeOfLastControlStep = curTime
-    
+
+
     #-----------------------------------------------------------------------------------------------
     def run( self ):
         
         while not self.stopped():
-
             
             self.getRoverStatusMessages()
-            
+
             if self.numStatusMessagesReceived > 2 and not self.connectedToRover:
-            
+
                 self.connectedToRover = True
                 print "Connected to Rover"
-        
-        
+
             if self.connectedToRover:
         
                 self.processScratchCommands()
                 self.updateControlLoop()
-                
-            
+
             # Send current state back to scratch
             curTime = time.time()
             if curTime - self.timeOfLastSensorUpdate >= self.MIN_TIME_BETWEEN_SENSOR_UPDATES:
@@ -440,7 +485,6 @@ if __name__ == '__main__':
     BLUETOOTH_SERIAL_PORT = "/dev/rfcomm2"
     BLUETOOTH_SERIAL_BAUD_RATE = 9600
 
-    bluetoothSerial = serial.Serial( BLUETOOTH_SERIAL_PORT, baudrate=BLUETOOTH_SERIAL_BAUD_RATE, timeout=0 )
 
     scratch_background.cycle_trace = 'start'
 
@@ -460,7 +504,8 @@ if __name__ == '__main__':
             
             commandQueue = multiprocessing.Queue()
             listener = scratch_background.ScratchListener( scratchSocket, commandQueue )
-            robotController = RobotController( scratchSocket, commandQueue, bluetoothSerial )
+            robot = py_websockets_bot.WebsocketsBot( args.remoteRobotHostname )
+            robotController = RobotController( scratchSocket, commandQueue, robot )
             
             scratch_background.cycle_trace = 'running'
             print "Running...."

@@ -1,4 +1,0 @@
-The rover directory should be copied to your Arduino libraries directory.
-
-You can then import the library using the Arduino GUI.
-The libraries directory on the raspbian image is at /usr/share/arduino/libraries/

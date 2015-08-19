@@ -4,7 +4,6 @@
 # derived from Simon Walters under GPL v2
 # derived from scratch_handler by Thomas Preston
 
-import socket
 import time
 import sys
 import errno
